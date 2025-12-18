@@ -1,0 +1,2 @@
+C:\Users\Estudiante\Desktop\escenafusion1-main\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\CMakeLists.txt
+C:\Users\Estudiante\Desktop\escenafusion1-main\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\CMakeLists.txt

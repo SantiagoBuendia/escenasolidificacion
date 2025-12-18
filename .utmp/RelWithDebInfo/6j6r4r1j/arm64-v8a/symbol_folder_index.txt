@@ -1,0 +1,1 @@
+C:\Users\Estudiante\Desktop\escenasolidificacion-main\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\build\intermediates\cxx\RelWithDebInfo\6j6r4r1j\obj\arm64-v8a
