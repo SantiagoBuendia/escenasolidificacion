@@ -5,82 +5,111 @@ using System.Collections;
 public class ControlSolidificacion : MonoBehaviour
 {
     [Header("Referencias de escena")]
-    public Transform hielo;        // Cubo de hielo final
-    public Transform agua;         // Modelo de agua en la olla
-    public Light luzEstufa;        // Luz indicadora del congelador
-    public TMP_Text textoUI;       // Texto de temperatura
+    public Transform hielo;
+    public Transform agua;
+    public Light luzEstufa;
+    public TMP_Text textoUI;
 
     [Header("Ajustes")]
-    public float velocidadBajadaTemp = 0.05f;   // Qué tan rápido baja la temperatura
-    public float velocidadDerretir = 0.005f;    // NO SE USA
-    public float velocidadSubidaAgua = 0.05f;   // NO SE USA
+    public float velocidadBajadaTemp = 0.05f;
 
-    // -------- ESTADOS INTERNOS --------
     public bool CongeladorEncendido = false;
     public bool tieneAgua = false;
 
-    // VARIABLES PARA BASE DE DATOS
     private float tiempoInicioSimulacion;
     private bool simulacionIniciadaBD = false;
     private bool simulacionFinalizadaBD = false;
+    private bool peticionEnCurso = false;
 
-    float temperaturaActual = 25f;  // Temperatura ambiente al inicio
-
-    // ?? ADICIÓN: límite máximo de temperatura
-    private const float TEMPERATURA_MAXIMA = 150f;
-
-    Vector3 aguaPosInicial;
-    Vector3 hieloPosInicial;
+    float temperaturaActual = 25f;
 
     void Start()
     {
-        aguaPosInicial = agua.localPosition;
-        hieloPosInicial = hielo.localPosition;
-
-        agua.gameObject.SetActive(false);
-        hielo.gameObject.SetActive(false);
-
+        if (agua != null) agua.gameObject.SetActive(false);
+        if (hielo != null) hielo.gameObject.SetActive(false);
         ActualizarTextoUI();
     }
 
-    // -----------------------------
-    //     ENCIENDE / APAGA
-    // -----------------------------
-    public void ToggleCongelador()
+    void Update()
     {
-        CongeladorEncendido = !CongeladorEncendido;
-
-        if (luzEstufa != null)
-            luzEstufa.enabled = CongeladorEncendido;
-
-        // --- REGISTRAR EVENTO EN BASE DE DATOS ---
-        if (simulacionIniciadaBD && !simulacionFinalizadaBD && GestorSimulacion.idSimulacionActual > 0)
+        if (tieneAgua && CongeladorEncendido && !simulacionFinalizadaBD)
         {
-            GestorSimulacionEvento.RegistrarEvento(
-                GestorSimulacion.idSimulacionActual,
-                CongeladorEncendido ? "Congelador Encendido" : "Congelador Apagado",
-                "Cambio de estado del interruptor",
-                (int)Time.time
-            );
+            temperaturaActual -= velocidadBajadaTemp * Time.deltaTime * 60f;
+            temperaturaActual = Mathf.Clamp(temperaturaActual, -5f, 25f);
+
+            ActualizarTextoUI();
+
+            if (temperaturaActual <= 0f)
+            {
+                simulacionFinalizadaBD = true;
+
+                float tiempoFinReal = Time.time;
+
+                if (agua != null) agua.gameObject.SetActive(false);
+                if (hielo != null) hielo.gameObject.SetActive(true);
+
+                StartCoroutine(RegistrarEventoSeguro("Solidificacion completada", "El agua se ha transformado en hielo"));
+
+                StartCoroutine(FinalizarSimulacionSeguro(tiempoFinReal));
+            }
         }
     }
 
-    // -----------------------------
-    //        RECIBIR AGUA
-    // -----------------------------
+    IEnumerator FinalizarSimulacionSeguro(float tiempoFinCapturado)
+    {
+        yield return new WaitUntil(() => GestorSimulacion.idSimulacionActual > 0);
+
+        int duracionCalculada = (int)(tiempoFinCapturado - tiempoInicioSimulacion);
+
+        if (duracionCalculada <= 0) duracionCalculada = (int)(Time.time - tiempoInicioSimulacion);
+
+        GestorSimulacionResultado.RegistrarResultado(
+            GestorSimulacion.idSimulacionActual,
+            "Punto de solidificacion",
+            temperaturaActual.ToString("F1"),
+            "°C"
+        );
+
+        GestorSimulacionFinalizar.FinalizarSimulacion(
+            GestorSimulacion.idSimulacionActual,
+            duracionCalculada
+        );
+
+        if (textoUI != null)
+        {
+            textoUI.text = "¡SOLIDIFICACIÓN\nCOMPLETADA!";
+            textoUI.color = Color.green;
+        }
+
+        Debug.Log("Simulación finalizada. Duración Real: " + duracionCalculada + "s");
+
+        Invoke("CerrarAplicacion", 5f);
+    }
+
+    IEnumerator RegistrarEventoSeguro(string nombre, string desc)
+    {
+        yield return new WaitUntil(() => GestorSimulacion.idSimulacionActual > 0);
+        GestorSimulacionEvento.RegistrarEvento(
+            GestorSimulacion.idSimulacionActual,
+            nombre,
+            desc,
+            (int)Time.time
+        );
+    }
+
     public void RecibirAgua()
     {
-        if (simulacionIniciadaBD) return;
+        if (simulacionIniciadaBD || peticionEnCurso) return;
 
-        tieneAgua = true;
-        agua.gameObject.SetActive(true);
-        hielo.gameObject.SetActive(false);
-
-        temperaturaActual = 25f; // reset a temperatura ambiente
-        temperaturaActual = Mathf.Min(temperaturaActual, TEMPERATURA_MAXIMA);
-
-        // INICIAR EN BD (Una sola vez)
+        peticionEnCurso = true;
         simulacionIniciadaBD = true;
+        tieneAgua = true;
+
+        if (agua != null) agua.gameObject.SetActive(true);
+        if (hielo != null) hielo.gameObject.SetActive(false);
+
+        temperaturaActual = 25f;
+
         tiempoInicioSimulacion = Time.time;
 
         GestorSimulacion.IniciarSimulacion(
@@ -90,88 +119,37 @@ public class ControlSolidificacion : MonoBehaviour
             "VR"
         );
 
-        StartCoroutine(RegistrarEventoInicial());
+        StartCoroutine(RegistrarEventoSeguro("Inicio Enfriamiento", "El agua ha entrado en el congelador"));
+        ActualizarTextoUI();
+    }
+
+    public void ToggleCongelador()
+    {
+        CongeladorEncendido = !CongeladorEncendido;
+        if (luzEstufa != null) luzEstufa.enabled = CongeladorEncendido;
+    }
+
+    void ActualizarTextoUI()
+    {
+        if (textoUI != null)
+            textoUI.text = "Temperatura\n" + Mathf.RoundToInt(temperaturaActual) + " °C";
+    }
+
+    public void ResetProceso()
+    {
+        simulacionIniciadaBD = false;
+        simulacionFinalizadaBD = false;
+        peticionEnCurso = false;
+        tieneAgua = false;
+        CongeladorEncendido = false;
+        temperaturaActual = 25f;
+
+        if (agua != null) agua.gameObject.SetActive(false);
+        if (hielo != null) hielo.gameObject.SetActive(false);
+        if (luzEstufa != null) luzEstufa.enabled = false;
 
         ActualizarTextoUI();
     }
 
-    void Update()
-    {
-        
-        if (tieneAgua && CongeladorEncendido && !simulacionFinalizadaBD)
-        {
-            temperaturaActual -= velocidadBajadaTemp * Time.deltaTime * 60f;
-            temperaturaActual = Mathf.Clamp(temperaturaActual, -5f, 25f);
-
-            ActualizarTextoUI();
-
-            // Cuando llega a 0°C -> se solidifica
-            if (temperaturaActual <= 0f)
-            {
-                // Marcamos como finalizado para que este IF no se repita más
-                simulacionFinalizadaBD = true;
-
-                agua.gameObject.SetActive(false);
-                hielo.gameObject.SetActive(true);
-
-                // LLAMAR A GUARDADO ÚNICO
-                FinalizarSimulacionSolidificacion();
-            }
-        }
-    }
-
-    // -----------------------------
-    //      UI DE TEMPERATURA
-    // -----------------------------
-    void ActualizarTextoUI()
-    {
-        if (textoUI != null)
-        {
-            textoUI.text = "temperatura\n" + Mathf.RoundToInt(temperaturaActual) + " grados";
-        }
-    }
-
-    void FinalizarSimulacionSolidificacion()
-    {
-        // 1. Guardar Resultado
-        GestorSimulacionResultado.RegistrarResultado(
-            GestorSimulacion.idSimulacionActual,
-            "Punto de solidificacion",
-            temperaturaActual.ToString("F1"),
-            "°C"
-        );
-
-        // 2. Finalizar Simulación
-        int duracionReal = (int)(Time.time - tiempoInicioSimulacion);
-        GestorSimulacionFinalizar.FinalizarSimulacion(
-            GestorSimulacion.idSimulacionActual,
-            duracionReal
-        );
-
-        if (textoUI != null)
-        {
-            textoUI.text = "¡SOLIDIFICACIÓN\nCOMPLETADA!";
-            textoUI.color = Color.green;
-        }
-
-        // 3. Cerrar App en 5 segundos
-        Invoke("CerrarAplicacion", 5f);
-    }
-
-    void CerrarAplicacion()
-    {
-        Debug.Log("Saliendo del simulador...");
-        Application.Quit();
-    }
-
-    IEnumerator RegistrarEventoInicial()
-    {
-        yield return new WaitUntil(() => GestorSimulacion.idSimulacionActual > 0);
-        GestorSimulacionEvento.RegistrarEvento(
-            GestorSimulacion.idSimulacionActual,
-            "Inicio Enfriamiento",
-            "El agua ha entrado en el congelador",
-            (int)Time.time
-        );
-    }
+    void CerrarAplicacion() { Application.Quit(); }
 }
